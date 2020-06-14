@@ -32,7 +32,7 @@ classes = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat"
 ```
 6、就会生成对应的2007_train.txt，每一行对应其图片位置及其真实框的位置。  
 7、在训练前需要修改model_data里面的voc_classes.txt文件，需要将classes改成你自己的classes。  
-8、修改train.py文件下的phi可以修改efficientdet的版本，训练前注意权重文件与Efficientdet版本的对齐。
+8、修改train.py文件下的phi可以修改efficientdet的版本，训练前注意权重文件与Efficientdet版本的对齐。  
 9、运行train.py即可开始训练。  
 
 ### mAP目标检测精度计算更新
