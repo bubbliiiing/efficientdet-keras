@@ -157,7 +157,7 @@ class Generator(object):
         x[x[:,:, 0]>255, 0] = 255
         x[:, :, 1:][x[:, :, 1:]>1] = 1
         x[x<0] = 0
-        image_data = cv2.cvtColor(x, cv2.COLOR_HSV2RGB) # numpy array, 0 to 1
+        image_data = cv2.cvtColor(x, cv2.COLOR_HSV2RGB)*255 # numpy array, 0 to 1
 
         # correct boxes
         box_data = np.zeros((len(box),5))
