@@ -217,8 +217,7 @@ class BBoxUtility(object):
         decode_bbox = np.minimum(np.maximum(decode_bbox, 0.0), 1.0)
         return decode_bbox
 
-
-    def detection_out(self, predictions, mbox_priorbox, keep_top_k=100, confidence_threshold=0.4):
+    def detection_out(self, predictions, mbox_priorbox, confidence_threshold=0.4):
         
         # 网络预测的结果
         mbox_loc = predictions[0]
@@ -260,7 +259,7 @@ class BBoxUtility(object):
                 detection = detections[cls_mask]
                 scores = detection[:,4]
                 # 5、根据得分对该种类进行从大到小排序。
-                arg_sort = np.argsort(scores)[::-1][:keep_top_k]
+                arg_sort = np.argsort(scores)[::-1]
                 detection = detection[arg_sort]
                 while np.shape(detection)[0]>0:
                     # 6、每次取出得分最大的框，计算其与其它所有预测框的重合程度，重合程度过大的则剔除。
