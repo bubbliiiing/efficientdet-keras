@@ -39,7 +39,6 @@ def efficientdet_correct_boxes(top, left, bottom, right, input_shape, image_shap
         box_maxes[:, 0:1],
         box_maxes[:, 1:2]
     ],axis=-1)
-    print(np.shape(boxes))
     boxes *= np.concatenate([image_shape, image_shape],axis=-1)
     return boxes
 
@@ -219,8 +218,7 @@ class BBoxUtility(object):
         return decode_bbox
 
 
-    def detection_out(self, predictions, mbox_priorbox, background_label_id=0, keep_top_k=200,
-                        confidence_threshold=0.4):
+    def detection_out(self, predictions, mbox_priorbox, keep_top_k=100, confidence_threshold=0.4):
         
         # 网络预测的结果
         mbox_loc = predictions[0]
@@ -262,7 +260,7 @@ class BBoxUtility(object):
                 detection = detections[cls_mask]
                 scores = detection[:,4]
                 # 5、根据得分对该种类进行从大到小排序。
-                arg_sort = np.argsort(scores)[::-1]
+                arg_sort = np.argsort(scores)[::-1][:keep_top_k]
                 detection = detection[arg_sort]
                 while np.shape(detection)[0]>0:
                     # 6、每次取出得分最大的框，计算其与其它所有预测框的重合程度，重合程度过大的则剔除。
