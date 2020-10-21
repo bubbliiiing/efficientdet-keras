@@ -21,7 +21,7 @@ class mAP_EfficientDet(EfficientDet):
     #---------------------------------------------------#
     def detect_image(self,image_id,image):
         self.confidence = 0.01
-        self.iou = 0.5
+        self.bbox_util._nms_thresh = 0.5
         f = open("./input/detection-results/"+image_id+".txt","w") 
         image_shape = np.array(np.shape(image)[0:2])
 
