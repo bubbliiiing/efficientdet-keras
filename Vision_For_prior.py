@@ -1,7 +1,9 @@
-import numpy as np
-import keras
 import pickle
+
+import keras
 import matplotlib.pyplot as plt
+import numpy as np
+
 
 def decode_boxes(mbox_loc, mbox_priorbox):
     # 获得先验框的宽与高
@@ -54,39 +56,36 @@ AnchorParameters.default = AnchorParameters(
     scales  = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)], keras.backend.floatx()),
 )
 
-def generate_anchors(base_size=16, ratios=None, scales=None):
-    if ratios is None:
-        ratios = AnchorParameters.default.ratios
-
-    if scales is None:
-        scales = AnchorParameters.default.scales
-
+def generate_anchors(base_size=16):
+    ratios = AnchorParameters.default.ratios
+    scales = AnchorParameters.default.scales
+    # num_anchors = 9
     num_anchors = len(ratios) * len(scales)
-
+    # anchors - 9,4
     anchors = np.zeros((num_anchors, 4))
-
     anchors[:, 2:] = base_size * np.tile(scales, (2, len(ratios))).T
+
+    # 计算先验框的面积
     areas = anchors[:, 2] * anchors[:, 3]
 
+    # np.repeat(ratios, len(scales))    [0.5 0.5 0.5 1.  1.  1.  2.  2.  2. ]
     anchors[:, 2] = np.sqrt(areas / np.repeat(ratios, len(scales)))
-    anchors[:, 3] = anchors[:, 2] * np.repeat(ratios, len(scales))
+    anchors[:, 3] = np.sqrt(areas * np.repeat(ratios, len(scales)))
 
-    anchors[:, 0::2] -= np.tile(anchors[:, 2] * 0.5, (2, 1)).T
+    anchors[:, 0::2] -= np.tile(anchors[:, 2] * 0.5, (2, 1)).T 
     anchors[:, 1::2] -= np.tile(anchors[:, 3] * 0.5, (2, 1)).T
     print(anchors)
     return anchors
 
 def shift(shape, stride, anchors):
-    # [0-64]
-    # [0.5-64.5]
+    # [0-64] -> [0.5-64.5] 
     shift_x = (np.arange(0, shape[1], dtype=keras.backend.floatx()) + 0.5) * stride
     shift_y = (np.arange(0, shape[0], dtype=keras.backend.floatx()) + 0.5) * stride
-
     shift_x, shift_y = np.meshgrid(shift_x, shift_y)
-
     shift_x = np.reshape(shift_x, [-1])
     shift_y = np.reshape(shift_y, [-1])
 
+    # 将网格中心进行堆叠
     shifts = np.stack([
         shift_x,
         shift_y,
@@ -98,11 +97,13 @@ def shift(shape, stride, anchors):
     number_of_anchors = np.shape(anchors)[0]
 
     k = np.shape(shifts)[0]
-
-    shifted_anchors = np.reshape(anchors, [1, number_of_anchors, 4]) + np.array(np.reshape(shifts, [k, 1, 4]), keras.backend.floatx())
-    # print(shifted_anchors)
+    # shifted_anchors   k, 9, 4 -> k*9, 4
+    shifted_anchors = np.reshape(anchors, [1, number_of_anchors, 4]) + np.array(np.reshape(shifts, [k, 1, 4]))
     shifted_anchors = np.reshape(shifted_anchors, [k * number_of_anchors, 4])
     
+    #-------------------------------#
+    #   可视化代码
+    #-------------------------------#
     if shape[0]==4:
         fig = plt.figure()
         ax = fig.add_subplot(121)
@@ -139,24 +140,23 @@ def shift(shape, stride, anchors):
         plt.gca().invert_yaxis()
         
         plt.show()
-
-
-
+        
     return shifted_anchors
 
-border = 512
-shape = [border,border]
-
-a = [64,32,16,8,4]
+image_size = 512
+features = [image_size/8, image_size/16, image_size/32, image_size/64, image_size/128]
 
 all_anchors = []
 for i in range(5):
+    #------------------------------#
+    #   先生成每个特征点的9个先验框
+    #   anchors     9, 4
+    #------------------------------#
     anchors = generate_anchors(AnchorParameters.default.sizes[i])
-    shifted_anchors = shift([a[i],a[i]], AnchorParameters.default.strides[i], anchors)
+    shifted_anchors = shift([features[i],features[i]], AnchorParameters.default.strides[i], anchors)
     all_anchors.append(shifted_anchors)
-
+    
+# 将每个特征层的先验框进行堆叠。
 all_anchors = np.concatenate(all_anchors,axis=0)
-all_anchors = all_anchors/border
-all_anchors = all_anchors.clip(0,1)
-
+all_anchors = all_anchors / image_size
 print(all_anchors)

@@ -1,64 +1,24 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
-import os
+import collections
 import json
 import math
+import os
 import string
-import collections
+
 import numpy as np
-from keras import backend
-from six.moves import xrange
-from nets.layers import BatchNormalization
-from keras import layers
+from keras import backend, layers
 
-BASE_WEIGHTS_PATH = (
-    'https://github.com/Callidior/keras-applications/'
-    'releases/download/efficientnet/')
-
-WEIGHTS_HASHES = {
-    'efficientnet-b0': ('163292582f1c6eaca8e7dc7b51b01c61'
-                        '5b0dbc0039699b4dcd0b975cc21533dc',
-                        'c1421ad80a9fc67c2cc4000f666aa507'
-                        '89ce39eedb4e06d531b0c593890ccff3'),
-    'efficientnet-b1': ('d0a71ddf51ef7a0ca425bab32b7fa7f1'
-                        '6043ee598ecee73fc674d9560c8f09b0',
-                        '75de265d03ac52fa74f2f510455ba64f'
-                        '9c7c5fd96dc923cd4bfefa3d680c4b68'),
-    'efficientnet-b2': ('bb5451507a6418a574534aa76a91b106'
-                        'f6b605f3b5dde0b21055694319853086',
-                        '433b60584fafba1ea3de07443b74cfd3'
-                        '2ce004a012020b07ef69e22ba8669333'),
-    'efficientnet-b3': ('03f1fba367f070bd2545f081cfa7f3e7'
-                        '6f5e1aa3b6f4db700f00552901e75ab9',
-                        'c5d42eb6cfae8567b418ad3845cfd63a'
-                        'a48b87f1bd5df8658a49375a9f3135c7'),
-    'efficientnet-b4': ('98852de93f74d9833c8640474b2c698d'
-                        'b45ec60690c75b3bacb1845e907bf94f',
-                        '7942c1407ff1feb34113995864970cd4'
-                        'd9d91ea64877e8d9c38b6c1e0767c411'),
-    'efficientnet-b5': ('30172f1d45f9b8a41352d4219bf930ee'
-                        '3339025fd26ab314a817ba8918fefc7d',
-                        '9d197bc2bfe29165c10a2af8c2ebc675'
-                        '07f5d70456f09e584c71b822941b1952'),
-    'efficientnet-b6': ('f5270466747753485a082092ac9939ca'
-                        'a546eb3f09edca6d6fff842cad938720',
-                        '1d0923bb038f2f8060faaf0a0449db4b'
-                        '96549a881747b7c7678724ac79f427ed'),
-    'efficientnet-b7': ('876a41319980638fa597acbbf956a82d'
-                        '10819531ff2dcb1a52277f10c7aefa1a',
-                        '60b56ff3a8daccc8d96edfd40b204c11'
-                        '3e51748da657afd58034d54d3cec2bac')
-}
-
+MOMENTUM = 0.99
+EPSILON = 1e-3
+#-------------------------------------------------#
+#   一共七个大结构块，每个大结构块都有特定的参数
+#-------------------------------------------------#
 BlockArgs = collections.namedtuple('BlockArgs', [
     'kernel_size', 'num_repeat', 'input_filters', 'output_filters',
     'expand_ratio', 'id_skip', 'strides', 'se_ratio'
 ])
 
-# defaults will be a public argument for namedtuple in Python 3.7
-# https://docs.python.org/3/library/collections.html#collections.namedtuple
 BlockArgs.__new__.__defaults__ = (None,) * len(BlockArgs._fields)
 
 DEFAULT_BLOCKS_ARGS = [
@@ -78,35 +38,29 @@ DEFAULT_BLOCKS_ARGS = [
               expand_ratio=6, id_skip=True, strides=[1, 1], se_ratio=0.25)
 ]
 
+#-------------------------------------------------#
+#   Kernel的初始化器
+#-------------------------------------------------#
 CONV_KERNEL_INITIALIZER = {
     'class_name': 'VarianceScaling',
     'config': {
         'scale': 2.0,
         'mode': 'fan_out',
-        # EfficientNet actually uses an untruncated normal distribution for
-        # initializing conv layers, but keras.initializers.VarianceScaling use
-        # a truncated distribution.
-        # We decided against a custom initializer for better serializability.
         'distribution': 'normal'
     }
 }
 
-DENSE_KERNEL_INITIALIZER = {
-    'class_name': 'VarianceScaling',
-    'config': {
-        'scale': 1. / 3.,
-        'mode': 'fan_out',
-        'distribution': 'uniform'
-    }
-}
-
+#-------------------------------------------------#
+#   Swish激活函数
+#-------------------------------------------------#
 def get_swish():
     def swish(x):
         return x * backend.sigmoid(x)
-
     return swish
 
-
+#-------------------------------------------------#
+#   Dropout层
+#-------------------------------------------------#
 def get_dropout():
     class FixedDropout(layers.Dropout):
         def _get_noise_shape(self, inputs):
@@ -120,7 +74,9 @@ def get_dropout():
 
     return FixedDropout
 
-
+#-------------------------------------------------#
+#   该函数的目的是保证filter的大小可以被8整除
+#-------------------------------------------------#
 def round_filters(filters, width_coefficient, depth_divisor):
     filters *= width_coefficient
     new_filters = int(filters + depth_divisor / 2) // depth_divisor * depth_divisor
@@ -129,17 +85,20 @@ def round_filters(filters, width_coefficient, depth_divisor):
         new_filters += depth_divisor
     return int(new_filters)
 
-
+#-------------------------------------------------#
+#   计算模块的重复次数
+#-------------------------------------------------#
 def round_repeats(repeats, depth_coefficient):
     return int(math.ceil(depth_coefficient * repeats))
 
 
-def mb_conv_block(inputs, block_args, activation, drop_rate=None, prefix='', freeze_bn=False):
-    has_se = (block_args.se_ratio is not None) and (0 < block_args.se_ratio <= 1)
-    bn_axis = 3 
-
+def mb_conv_block(inputs, block_args, activation, drop_rate=None, prefix=''):
     Dropout = get_dropout()
 
+    #-------------------------------------------------#
+    #   利用Inverted residuals
+    #   part1 利用1x1卷积进行通道数上升
+    #-------------------------------------------------#
     filters = block_args.input_filters * block_args.expand_ratio
     if block_args.expand_ratio != 1:
         x = layers.Conv2D(filters, 1,
@@ -147,30 +106,35 @@ def mb_conv_block(inputs, block_args, activation, drop_rate=None, prefix='', fre
                           use_bias=False,
                           kernel_initializer=CONV_KERNEL_INITIALIZER,
                           name=prefix + 'expand_conv')(inputs)
-        x = layers.BatchNormalization(axis=bn_axis, name=prefix + 'expand_bn')(x)
+        x = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=prefix + 'expand_bn')(x)
         x = layers.Activation(activation, name=prefix + 'expand_activation')(x)
     else:
         x = inputs
 
-    # Depthwise Convolution
+    #------------------------------------------------------#
+    #   如果步长为2x2的话，利用深度可分离卷积进行高宽压缩
+    #   part2 利用3x3卷积对每一个channel进行卷积
+    #------------------------------------------------------#
     x = layers.DepthwiseConv2D(block_args.kernel_size,
                                strides=block_args.strides,
                                padding='same',
                                use_bias=False,
                                depthwise_initializer=CONV_KERNEL_INITIALIZER,
                                name=prefix + 'dwconv')(x)
-    x = layers.BatchNormalization(axis=bn_axis, name=prefix + 'bn')(x)
+    x = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=prefix + 'bn')(x)
     x = layers.Activation(activation, name=prefix + 'activation')(x)
 
-    # Squeeze and Excitation phase
-    if has_se:
-        num_reduced_filters = max(1, int(
-            block_args.input_filters * block_args.se_ratio
-        ))
+    #------------------------------------------------------#
+    #   完成深度可分离卷积后
+    #   对深度可分离卷积的结果施加注意力机制
+    #------------------------------------------------------#
+    if 0 < block_args.se_ratio <= 1:
+        num_reduced_filters = max(1, int(block_args.input_filters * block_args.se_ratio))
         se_tensor = layers.GlobalAveragePooling2D(name=prefix + 'se_squeeze')(x)
-
-        target_shape = (1, 1, filters) if backend.image_data_format() == 'channels_last' else (filters, 1, 1)
-        se_tensor = layers.Reshape(target_shape, name=prefix + 'se_reshape')(se_tensor)
+        se_tensor = layers.Reshape((1, 1, filters), name=prefix + 'se_reshape')(se_tensor)
+        #------------------------------------------------------#
+        #   通道先压缩后上升，最后利用sigmoid将值固定到0-1之间
+        #------------------------------------------------------#
         se_tensor = layers.Conv2D(num_reduced_filters, 1,
                                   activation=activation,
                                   padding='same',
@@ -183,27 +147,22 @@ def mb_conv_block(inputs, block_args, activation, drop_rate=None, prefix='', fre
                                   use_bias=True,
                                   kernel_initializer=CONV_KERNEL_INITIALIZER,
                                   name=prefix + 'se_expand')(se_tensor)
-        if backend.backend() == 'theano':
-            # For the Theano backend, we have to explicitly make
-            # the excitation weights broadcastable.
-            pattern = ([True, True, True, False] if backend.image_data_format() == 'channels_last'
-                       else [True, False, True, True])
-            se_tensor = layers.Lambda(
-                lambda x: backend.pattern_broadcast(x, pattern),
-                name=prefix + 'se_broadcast')(se_tensor)
         x = layers.multiply([x, se_tensor], name=prefix + 'se_excite')
 
-    # Output phase
+    #------------------------------------------------------#
+    #   part3 利用1x1卷积进行通道下降
+    #------------------------------------------------------#
     x = layers.Conv2D(block_args.output_filters, 1,
                       padding='same',
                       use_bias=False,
                       kernel_initializer=CONV_KERNEL_INITIALIZER,
                       name=prefix + 'project_conv')(x)
-    # x = BatchNormalization(freeze=freeze_bn, axis=bn_axis, name=prefix + 'project_bn')(x)
-    x = layers.BatchNormalization(axis=bn_axis, name=prefix + 'project_bn')(x)
-    if block_args.id_skip and all(
-            s == 1 for s in block_args.strides
-    ) and block_args.input_filters == block_args.output_filters:
+    x = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=prefix + 'project_bn')(x)
+
+    #------------------------------------------------------#
+    #   part4 如果满足残差条件，那么就增加残差边
+    #------------------------------------------------------#
+    if block_args.id_skip and all(s == 1 for s in block_args.strides) and block_args.input_filters == block_args.output_filters:
         if drop_rate and (drop_rate > 0):
             x = Dropout(drop_rate,
                         noise_shape=(None, 1, 1, 1),
@@ -215,32 +174,17 @@ def mb_conv_block(inputs, block_args, activation, drop_rate=None, prefix='', fre
 
 def EfficientNet(width_coefficient,
                  depth_coefficient,
-                 default_resolution,
-                 dropout_rate=0.2,
                  drop_connect_rate=0.2,
                  depth_divisor=8,
                  blocks_args=DEFAULT_BLOCKS_ARGS,
-                 model_name='efficientnet',
-                 include_top=True,
-                 weights='imagenet',
-                 input_tensor=None,
-                 input_shape=None,
-                 pooling=None,
-                 classes=1000,
-                 freeze_bn=False,
+                 inputs=None,
                  **kwargs):
-    features = []
-    
-
-    if input_tensor is None:
-        img_input = layers.Input(shape=input_shape)
-    else:
-        img_input = input_tensor
-
-    bn_axis = 3 
     activation = get_swish(**kwargs)
 
-    # Build stem
+    img_input = inputs
+    #-------------------------------------------------#
+    #   创建stem部分
+    #-------------------------------------------------#
     x = img_input
     x = layers.Conv2D(round_filters(32, width_coefficient, depth_divisor), 3,
                       strides=(2, 2),
@@ -248,172 +192,88 @@ def EfficientNet(width_coefficient,
                       use_bias=False,
                       kernel_initializer=CONV_KERNEL_INITIALIZER,
                       name='stem_conv')(x)
-    # x = BatchNormalization(freeze=freeze_bn, axis=bn_axis, name='stem_bn')(x)
-    x = layers.BatchNormalization(axis=bn_axis, name='stem_bn')(x)
+    x = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name='stem_bn')(x)
     x = layers.Activation(activation, name='stem_activation')(x)
-    # Build blocks
-    num_blocks_total = sum(block_args.num_repeat for block_args in blocks_args)
+
+    features = []
+    #-------------------------------------------------#
+    #   计算总的efficient_block的数量
+    #-------------------------------------------------#
     block_num = 0
+    num_blocks_total = sum(block_args.num_repeat for block_args in blocks_args)
+    #------------------------------------------------------------------------------#
+    #   对结构块参数进行循环、一共进行7个大的结构块。
+    #   每个大结构块下会重复小的efficient_block
+    #------------------------------------------------------------------------------#
     for idx, block_args in enumerate(blocks_args):
         assert block_args.num_repeat > 0
-        # Update block input and output filters based on depth multiplier.
+        #-------------------------------------------------#
+        #   对使用到的参数进行更新
+        #-------------------------------------------------#
         block_args = block_args._replace(
-            input_filters=round_filters(block_args.input_filters,
-                                        width_coefficient, depth_divisor),
-            output_filters=round_filters(block_args.output_filters,
-                                         width_coefficient, depth_divisor),
-            num_repeat=round_repeats(block_args.num_repeat, depth_coefficient))
+            input_filters   = round_filters(block_args.input_filters, width_coefficient, depth_divisor),
+            output_filters  = round_filters(block_args.output_filters, width_coefficient, depth_divisor),
+            num_repeat      = round_repeats(block_args.num_repeat, depth_coefficient))
 
-        # The first block needs to take care of stride and filter size increase.
+        # 计算drop_rate
         drop_rate = drop_connect_rate * float(block_num) / num_blocks_total
         x = mb_conv_block(x, block_args,
                           activation=activation,
                           drop_rate=drop_rate,
-                          prefix='block{}a_'.format(idx + 1),
-                          freeze_bn=freeze_bn
-                          )
+                          prefix='block{}a_'.format(idx + 1))
         block_num += 1
         if block_args.num_repeat > 1:
-            # pylint: disable=protected-access
-            block_args = block_args._replace(
-                input_filters=block_args.output_filters, strides=[1, 1])
-            # pylint: enable=protected-access
-            for bidx in xrange(block_args.num_repeat - 1):
+            #-------------------------------------------------#
+            #   对使用到的参数进行更新
+            #-------------------------------------------------#
+            block_args = block_args._replace(input_filters=block_args.output_filters, strides=[1, 1])
+            for bidx in range(block_args.num_repeat - 1):
+                # 计算drop_rate
                 drop_rate = drop_connect_rate * float(block_num) / num_blocks_total
-                block_prefix = 'block{}{}_'.format(
-                    idx + 1,
-                    string.ascii_lowercase[bidx + 1]
-                )
                 x = mb_conv_block(x, block_args,
-                                  activation=activation,
-                                  drop_rate=drop_rate,
-                                  prefix=block_prefix,
-                                  freeze_bn=freeze_bn
-                                  )
+                                  activation = activation,
+                                  drop_rate = drop_rate,
+                                  prefix = 'block{}{}_'.format(idx + 1, string.ascii_lowercase[bidx + 1]))
                 block_num += 1
+
         if idx < len(blocks_args) - 1 and blocks_args[idx + 1].strides[0] == 2:
             features.append(x)
         elif idx == len(blocks_args) - 1:
             features.append(x)
     return features
 
-
-def EfficientNetB0(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.0, 1.0, 224, 0.2,
-                        model_name='efficientnet-b0',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB0(inputs=None, **kwargs):
+    return EfficientNet(1.0, 1.0, inputs=inputs, **kwargs)
 
 
-def EfficientNetB1(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.0, 1.1, 240, 0.2,
-                        model_name='efficientnet-b1',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB1(inputs=None, **kwargs):
+    return EfficientNet(1.0, 1.1, inputs=inputs, **kwargs)
 
 
-def EfficientNetB2(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.1, 1.2, 260, 0.3,
-                        model_name='efficientnet-b2',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB2(inputs=None, **kwargs):
+    return EfficientNet(1.1, 1.2, inputs=inputs, **kwargs)
 
 
-def EfficientNetB3(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.2, 1.4, 300, 0.3,
-                        model_name='efficientnet-b3',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB3(inputs=None, **kwargs):
+    return EfficientNet(1.2, 1.4, inputs=inputs, **kwargs)
 
 
-def EfficientNetB4(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.4, 1.8, 380, 0.4,
-                        model_name='efficientnet-b4',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB4(inputs=None, **kwargs):
+    return EfficientNet(1.4, 1.8, inputs=inputs, **kwargs)
 
 
-def EfficientNetB5(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.6, 2.2, 456, 0.4,
-                        model_name='efficientnet-b5',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB5(inputs=None, **kwargs):
+    return EfficientNet(1.6, 2.2, inputs=inputs, **kwargs)
 
 
-def EfficientNetB6(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(1.8, 2.6, 528, 0.5,
-                        model_name='efficientnet-b6',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+
+def EfficientNetB6(inputs=None, **kwargs):
+    return EfficientNet(1.8, 2.6, inputs=inputs, **kwargs)
 
 
-def EfficientNetB7(include_top=True,
-                   weights='imagenet',
-                   input_tensor=None,
-                   input_shape=None,
-                   pooling=None,
-                   classes=1000,
-                   **kwargs):
-    return EfficientNet(2.0, 3.1, 600, 0.5,
-                        model_name='efficientnet-b7',
-                        include_top=include_top, weights=weights,
-                        input_tensor=input_tensor, input_shape=input_shape,
-                        pooling=pooling, classes=classes,
-                        **kwargs)
+def EfficientNetB7(inputs=None, **kwargs):
+    return EfficientNet(2.0, 3.1, inputs=inputs, **kwargs)
 
+
+if __name__ == '__main__':
+    print(EfficientNetB0())

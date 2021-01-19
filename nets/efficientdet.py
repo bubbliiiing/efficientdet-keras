@@ -1,38 +1,55 @@
 from functools import reduce
 
-import tensorflow as tf
-
 import keras
-from keras import layers
-from keras import initializers
-from keras import models
-from nets.efficientnet import EfficientNetB0, EfficientNetB1, EfficientNetB2,EfficientNetB3, EfficientNetB4, EfficientNetB5, EfficientNetB6, EfficientNetB7
-from nets.layers import BatchNormalization,wBiFPNAdd
-from utils.utils import PriorProbability
 import numpy as np
+import tensorflow as tf
+from keras import initializers, layers, models
+from utils.utils import PriorProbability
+
+from nets.efficientnet import (EfficientNetB0, EfficientNetB1, EfficientNetB2,
+                               EfficientNetB3, EfficientNetB4, EfficientNetB5,
+                               EfficientNetB6, EfficientNetB7)
+from nets.layers import wBiFPNAdd
 
 MOMENTUM = 0.99
 EPSILON = 1e-3
 
-def SeparableConvBlock(num_channels, kernel_size, strides, name, freeze_bn=False):
+def SeparableConvBlock(num_channels, kernel_size, strides, name):
     f1 = layers.SeparableConv2D(num_channels, kernel_size=kernel_size, strides=strides, padding='same',
                                 use_bias=True, name=f'{name}/conv')
     f2 = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{name}/bn')
-    # f2 = BatchNormalization(freeze=freeze_bn, name=f'{name}/bn')
     return reduce(lambda f, g: lambda *args, **kwargs: g(f(*args, **kwargs)), (f1, f2))
 
 
-def build_wBiFPN(features, num_channels, id, freeze_bn=False):
+def build_wBiFPN(features, num_channels, id):
     if id == 0:
+        #-------------------------------------------#
+        #   获得三个shape的有效特征层
+        #   分别是C3  64, 64, 40
+        #         C4  32, 32, 112
+        #         C5  16, 16, 320
+        #-------------------------------------------#
         _, _, C3, C4, C5 = features
-        # 第一次BIFPN需要 下采样 与 降通道 获得 p3_in p4_in p5_in p6_in p7_in
-        #-----------------------------下采样 与 降通道----------------------------#
+        
+        #------------------------------------------------------------------------#
+        #   第一次BIFPN需要 下采样 与 调整通道 获得 p3_in p4_in p5_in p6_in p7_in
+        #------------------------------------------------------------------------#
+
+        #-------------------------------------------#
+        #   首先对通道数进行调整
+        #   C3 64, 64, 40 -> 64, 64, 64
+        #-------------------------------------------#
         P3_in = C3
         P3_in = layers.Conv2D(num_channels, kernel_size=1, padding='same',
                               name=f'fpn_cells/cell_{id}/fnode3/resample_0_0_8/conv2d')(P3_in)
         P3_in = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON,
                                           name=f'fpn_cells/cell_{id}/fnode3/resample_0_0_8/bn')(P3_in)
 
+        #-------------------------------------------#
+        #   首先对通道数进行调整
+        #   C4 32, 32, 112 -> 32, 32, 64
+        #                  -> 32, 32, 64
+        #-------------------------------------------#
         P4_in = C4
         P4_in_1 = layers.Conv2D(num_channels, kernel_size=1, padding='same',
                                 name=f'fpn_cells/cell_{id}/fnode2/resample_0_1_7/conv2d')(P4_in)
@@ -43,6 +60,11 @@ def build_wBiFPN(features, num_channels, id, freeze_bn=False):
         P4_in_2 = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON,
                                             name=f'fpn_cells/cell_{id}/fnode4/resample_0_1_9/bn')(P4_in_2)
 
+        #-------------------------------------------#
+        #   首先对通道数进行调整
+        #   C5 16, 16, 320 -> 16, 16, 64
+        #                  -> 16, 16, 64
+        #-------------------------------------------#
         P5_in = C5
         P5_in_1 = layers.Conv2D(num_channels, kernel_size=1, padding='same',
                                 name=f'fpn_cells/cell_{id}/fnode1/resample_0_2_6/conv2d')(P5_in)
@@ -53,10 +75,18 @@ def build_wBiFPN(features, num_channels, id, freeze_bn=False):
         P5_in_2 = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON,
                                             name=f'fpn_cells/cell_{id}/fnode5/resample_0_2_10/bn')(P5_in_2)
 
+        #-------------------------------------------#
+        #   对C5进行下采样，调整通道数与宽高
+        #   C5 16, 16, 320 -> 8, 8, 64
+        #-------------------------------------------#
         P6_in = layers.Conv2D(num_channels, kernel_size=1, padding='same', name='resample_p6/conv2d')(C5)
         P6_in = layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name='resample_p6/bn')(P6_in)
         P6_in = layers.MaxPooling2D(pool_size=3, strides=2, padding='same', name='resample_p6/maxpool')(P6_in)
 
+        #-------------------------------------------#
+        #   对P6_in进行下采样，调整宽高
+        #   P6_in 8, 8, 64 -> 4, 4, 64
+        #-------------------------------------------#
         P7_in = layers.MaxPooling2D(pool_size=3, strides=2, padding='same', name='resample_p7/maxpool')(P6_in)
         #-------------------------------------------------------------------------#
 
@@ -161,7 +191,7 @@ def build_wBiFPN(features, num_channels, id, freeze_bn=False):
 
     return [P3_out, P4_out, P5_out, P6_out, P7_out]
 
-def build_BiFPN(features, num_channels, id, freeze_bn=False):
+def build_BiFPN(features, num_channels, id):
     if id == 0:
         # 第一次BIFPN需要 下采样 与 降通道 获得 p3_in p4_in p5_in p6_in p7_in
         #-----------------------------下采样 与 降通道----------------------------#
@@ -299,8 +329,12 @@ def build_BiFPN(features, num_channels, id, freeze_bn=False):
                                     name=f'fpn_cells/cell_{id}/fnode7/op_after_combine12')(P7_out)
     return [P3_out, P4_out, P5_out, P6_out, P7_out]
 
+#------------------------------------------#
+#   获得回归预测结果
+#   该部分会对先验框进行调整获得预测框
+#------------------------------------------#
 class BoxNet:
-    def __init__(self, width, depth, num_anchors=9, freeze_bn=False, name='box_net', **kwargs):
+    def __init__(self, width, depth, num_anchors=9, name='box_net', **kwargs):
         self.name = name
         self.width = width
         self.depth = depth
@@ -317,10 +351,8 @@ class BoxNet:
         self.convs = [layers.SeparableConv2D(filters=width, name=f'{self.name}/box-{i}', **options) for i in range(depth)]
         self.head = layers.SeparableConv2D(filters=num_anchors * 4, name=f'{self.name}/box-predict', **options)
 
-        self.bns = [
-            [layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/box-{i}-bn-{j}') for j in
-             range(3, 8)]
-            for i in range(depth)]
+        self.bns = [[layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/box-{i}-bn-{j}') for j in
+             range(3, 8)] for i in range(depth)]
 
         self.relu = layers.Lambda(lambda x: tf.nn.swish(x))
         self.reshape = layers.Reshape((-1, 4))
@@ -335,9 +367,12 @@ class BoxNet:
         outputs = self.reshape(outputs)
         return outputs
 
-
+#------------------------------------------#
+#   获得分类预测结果
+#   该部分会判断先验框对应的物体种类
+#------------------------------------------#
 class ClassNet:
-    def __init__(self, width, depth, num_classes=20, num_anchors=9, freeze_bn=False, name='class_net', **kwargs):
+    def __init__(self, width, depth, num_classes=20, num_anchors=9, name='class_net', **kwargs):
         self.name = name
         self.width = width
         self.depth = depth
@@ -351,17 +386,11 @@ class ClassNet:
             'pointwise_initializer': initializers.VarianceScaling(),
         }
 
-        self.convs = [layers.SeparableConv2D(filters=width, bias_initializer='zeros', name=f'{self.name}/class-{i}',
-                                                **options)
-                        for i in range(depth)]
-        self.head = layers.SeparableConv2D(filters=num_classes * num_anchors,
-                                            bias_initializer=PriorProbability(probability=0.01),
-                                            name=f'{self.name}/class-predict', **options)
+        self.convs = [layers.SeparableConv2D(filters=width, bias_initializer='zeros', name=f'{self.name}/class-{i}', **options) for i in range(depth)]
+        self.head = layers.SeparableConv2D(filters=num_classes * num_anchors, bias_initializer=PriorProbability(probability=0.01), name=f'{self.name}/class-predict', **options)
 
-        self.bns = [
-            [layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/class-{i}-bn-{j}') for j
-             in range(3, 8)]
-            for i in range(depth)]
+        self.bns = [[layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/class-{i}-bn-{j}') for j
+             in range(3, 8)] for i in range(depth)]
 
         self.relu = layers.Lambda(lambda x: tf.nn.swish(x))
         self.reshape = layers.Reshape((-1, num_classes))
@@ -378,40 +407,56 @@ class ClassNet:
         outputs = self.activation(outputs)
         return outputs
 
-def Efficientdet(phi, num_classes=20, num_anchors=9, freeze_bn=False):
+def Efficientdet(phi, num_classes=20, num_anchors=9):
     assert phi in range(8)
-    fpn_num_filters = [64, 88, 112, 160, 224, 288, 384,384]
-    fpn_cell_repeats = [3, 4, 5, 6, 7, 7, 8, 8]
-    box_class_repeats = [3, 3, 3, 4, 4, 4, 5, 5]
-    image_sizes = [512, 640, 768, 896, 1024, 1280, 1408, 1536]
-    backbones = [EfficientNetB0, EfficientNetB1, EfficientNetB2,
-                EfficientNetB3, EfficientNetB4, EfficientNetB5, EfficientNetB6, EfficientNetB7]
-                
+    # 不同版本的Efficientdet的efficientdet使用的参数不同。
+    fpn_num_filters     = [64, 88, 112, 160, 224, 288, 384,384]
+    fpn_cell_repeats    = [3, 4, 5, 6, 7, 7, 8, 8]
+    box_class_repeats   = [3, 3, 3, 4, 4, 4, 5, 5]
+    image_sizes         = [512, 640, 768, 896, 1024, 1280, 1408, 1536]
+    backbones           = [EfficientNetB0, EfficientNetB1, EfficientNetB2,
+                           EfficientNetB3, EfficientNetB4, EfficientNetB5, 
+                           EfficientNetB6, EfficientNetB7]
+                           
+    #------------------------------------------------------#
+    #   神经网络的输入
+    #   efficientdet-D0     512,512,3
+    #------------------------------------------------------#
+    inputs = layers.Input((image_sizes[phi], image_sizes[phi], 3))
 
-    input_size = image_sizes[phi]
-    input_shape = (input_size, input_size, 3)
-    image_input = layers.Input(input_shape)
-
-    features = backbones[phi](input_tensor=image_input, freeze_bn=freeze_bn)
-    fpn_features = features
+    #------------------------------------------------------#
+    #   在经过多次BiFPN模块的堆叠后，我们获得的fpn_features
+    #   包括五个有效特征层：
+    #   P3_out      64,64,64
+    #   P4_out      32,32,64
+    #   P5_out      16,16,64
+    #   P6_out      8,8,64
+    #   P7_out      4,4,64
+    #------------------------------------------------------#
+    fpn_features = backbones[phi](inputs=inputs)
     if phi < 6:
         for i in range(fpn_cell_repeats[phi]):
-            fpn_features = build_wBiFPN(fpn_features, fpn_num_filters[phi], i, freeze_bn=freeze_bn)
+            fpn_features = build_wBiFPN(fpn_features, fpn_num_filters[phi], i)
     else:
-        
         for i in range(fpn_cell_repeats[phi]):
-            fpn_features = build_BiFPN(fpn_features, fpn_num_filters[phi], i, freeze_bn=freeze_bn)
+            fpn_features = build_BiFPN(fpn_features, fpn_num_filters[phi], i)
 
-    box_net = BoxNet(fpn_num_filters[phi], box_class_repeats[phi], num_anchors=num_anchors, freeze_bn=freeze_bn, 
-                     name='box_net')
-    class_net = ClassNet(fpn_num_filters[phi], box_class_repeats[phi], num_classes=num_classes, num_anchors=num_anchors,
-                         freeze_bn=freeze_bn, name='class_net')
+    #------------------------------------------------------#
+    #   创建efficient head
+    #   可以将特征层转换成预测结果
+    #------------------------------------------------------#
+    box_net = BoxNet(fpn_num_filters[phi], box_class_repeats[phi], num_anchors=num_anchors, name='box_net')
+    class_net = ClassNet(fpn_num_filters[phi], box_class_repeats[phi], num_classes=num_classes, num_anchors=num_anchors, name='class_net')
 
+    #------------------------------------------------------#
+    #   利用efficient head获得各个特征层的预测结果
+    #   并且将预测结果进行堆叠。
+    #------------------------------------------------------#
     classification = [class_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
     classification = layers.Concatenate(axis=1, name='classification')(classification)
     regression = [box_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
     regression = layers.Concatenate(axis=1, name='regression')(regression)
 
-    model = models.Model(inputs=[image_input], outputs=[regression,classification], name='efficientdet')
+    model = models.Model(inputs=[inputs], outputs=[regression, classification], name='efficientdet')
 
     return model

@@ -1,12 +1,14 @@
-import numpy as np
 import keras
+import numpy as np
+from keras.callbacks import (EarlyStopping, ModelCheckpoint, ReduceLROnPlateau,
+                             TensorBoard)
 from keras.optimizers import Adam
-from nets.efficientdet_training import Generator
-from nets.efficientdet_training import focal,smooth_l1 
+
 from nets.efficientdet import Efficientdet
-from keras.callbacks import TensorBoard, ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
-from utils.utils import BBoxUtility
+from nets.efficientdet_training import Generator, focal, smooth_l1
 from utils.anchors import get_anchors
+from utils.utils import BBoxUtility
+
 
 #---------------------------------------------------#
 #   获得类和先验框
@@ -31,11 +33,20 @@ if __name__ == "__main__":
     #   二者所使用Efficientdet版本要相同
     #-------------------------------------------#
     phi = 0
+    #----------------------------------------------------#
+    #   获得图片路径和标签
+    #----------------------------------------------------#
     annotation_path = '2007_train.txt'
-
+    #----------------------------------------------------#
+    #   classes的路径，非常重要
+    #   训练前一定要修改classes_path，使其对应自己的数据集
+    #----------------------------------------------------#
     classes_path = 'model_data/voc_classes.txt' 
+    #------------------------------------------------------#
+    #   一共有多少类和多少先验框
+    #------------------------------------------------------#
     class_names = get_classes(classes_path)
-    NUM_CLASSES = len(class_names)  
+    num_classes = len(class_names)  
 
     #------------------------------------------------------#
     #   权值文件请看README，百度网盘下载
@@ -44,13 +55,23 @@ if __name__ == "__main__":
     #------------------------------------------------------#
     model_path = "model_data/efficientdet-d0-voc.h5"
 
-    model = Efficientdet(phi,num_classes=NUM_CLASSES)
-    priors = get_anchors(image_sizes[phi])
-    bbox_util = BBoxUtility(NUM_CLASSES, priors)
-
+    #------------------------------------------------------#
+    #   创建Efficientdet模型
+    #------------------------------------------------------#
+    model = Efficientdet(phi,num_classes=num_classes)
     model.load_weights(model_path,by_name=True,skip_mismatch=True)
+    
+    #-------------------------------#
+    #   获得先验框
+    #-------------------------------#
+    priors = get_anchors(image_sizes[phi])
+    bbox_util = BBoxUtility(num_classes, priors)
 
-    # 0.1用于验证，0.9用于训练
+    #----------------------------------------------------------------------#
+    #   验证集的划分在train.py代码里面进行
+    #   2007_test.txt和2007_val.txt里面没有内容是正常的。训练不会使用到。
+    #   当前划分方式下，验证集和训练集的比例为1:9
+    #----------------------------------------------------------------------#
     val_split = 0.1
     with open(annotation_path) as f:
         lines = f.readlines()
@@ -60,7 +81,13 @@ if __name__ == "__main__":
     num_val = int(len(lines)*val_split)
     num_train = len(lines) - num_val
 
-    # 训练参数设置
+    #-------------------------------------------------------------------------------#
+    #   训练参数的设置
+    #   logging表示tensorboard的保存地址
+    #   checkpoint用于设置权值保存的细节，period用于修改多少epoch保存一次
+    #   reduce_lr用于设置学习率下降的方式
+    #   early_stopping用于设定早停，val_loss多次不下降自动结束训练，表示模型基本收敛
+    #-------------------------------------------------------------------------------#
     logging = TensorBoard(log_dir="logs")
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1)
     checkpoint = ModelCheckpoint('logs/ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5',
@@ -80,25 +107,26 @@ if __name__ == "__main__":
     #------------------------------------------------------#
     if True:
         #--------------------------------------------#
-        #   BATCH_SIZE不要太小，不然训练效果很差
+        #   Batch_size不要太小，不然训练效果很差
         #--------------------------------------------#
-        BATCH_SIZE = 4
+        Batch_size = 8
         Lr = 1e-3
         Init_Epoch = 0
         Freeze_Epoch = 50
-        gen = Generator(bbox_util, BATCH_SIZE, lines[:num_train], lines[num_train:],
-                        (image_sizes[phi], image_sizes[phi]),NUM_CLASSES)
+
+        gen = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
+                        (image_sizes[phi], image_sizes[phi]),num_classes)
         model.compile(loss={
                     'regression'    : smooth_l1(),
                     'classification': focal()
                 },optimizer=keras.optimizers.Adam(Lr)
         )   
-        print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, BATCH_SIZE))
+        print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, Batch_size))
         model.fit_generator(
                 gen.generate(True), 
-                steps_per_epoch=max(1, num_train//BATCH_SIZE),
+                steps_per_epoch=max(1, num_train//Batch_size),
                 validation_data=gen.generate(False),
-                validation_steps=max(1, num_val//BATCH_SIZE),
+                validation_steps=max(1, num_val//Batch_size),
                 epochs=Freeze_Epoch, 
                 verbose=1,
                 initial_epoch=Init_Epoch ,
@@ -110,26 +138,27 @@ if __name__ == "__main__":
 
     if True:
         #--------------------------------------------#
-        #   BATCH_SIZE不要太小，不然训练效果很差
+        #   Batch_size不要太小，不然训练效果很差
         #--------------------------------------------#
-        BATCH_SIZE = 4
+        Batch_size = 4
         Lr = 5e-5
         Freeze_Epoch = 50
         Epoch = 100
-        gen = Generator(bbox_util, BATCH_SIZE, lines[:num_train], lines[num_train:],
-                        (image_sizes[phi], image_sizes[phi]),NUM_CLASSES)
+        
+        gen = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
+                        (image_sizes[phi], image_sizes[phi]),num_classes)
 
         model.compile(loss={
                     'regression'    : smooth_l1(),
                     'classification': focal()
                 },optimizer=keras.optimizers.Adam(Lr)
         )   
-        print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, BATCH_SIZE))
+        print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, Batch_size))
         model.fit_generator(
                 gen.generate(True), 
-                steps_per_epoch=max(1, num_train//BATCH_SIZE),
+                steps_per_epoch=max(1, num_train//Batch_size),
                 validation_data=gen.generate(False),
-                validation_steps=max(1, num_val//BATCH_SIZE),
+                validation_steps=max(1, num_val//Batch_size),
                 epochs=Epoch, 
                 verbose=1,
                 initial_epoch=Freeze_Epoch,

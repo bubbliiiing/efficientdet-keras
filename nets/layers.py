@@ -2,30 +2,6 @@ import keras
 import tensorflow as tf
 
 
-class BatchNormalization(keras.layers.BatchNormalization):
-    """
-    Identical to keras.layers.BatchNormalization, but adds the option to freeze parameters.
-    """
-    def __init__(self, freeze, *args, **kwargs):
-        self.freeze = freeze
-        super(BatchNormalization, self).__init__(*args, **kwargs)
-
-        # set to non-trainable if freeze is true
-        self.trainable = not self.freeze
-
-    def call(self, inputs, training=None, **kwargs):
-        # return super.call, but set training
-        if not training:
-            return super(BatchNormalization, self).call(inputs, training=False)
-        else:
-            return super(BatchNormalization, self).call(inputs, training=(not self.freeze))
-
-    def get_config(self):
-        config = super(BatchNormalization, self).get_config()
-        config.update({'freeze': self.freeze})
-        return config
-
-
 class wBiFPNAdd(keras.layers.Layer):
     def __init__(self, epsilon=1e-4, **kwargs):
         super(wBiFPNAdd, self).__init__(**kwargs)

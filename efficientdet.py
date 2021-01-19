@@ -1,16 +1,20 @@
+import colorsys
+import os
+import pickle
+
 import keras
 import numpy as np
-import colorsys
-import pickle
-import os
-from nets.efficientdet import Efficientdet
 from keras import backend as K
 from keras.layers import Input
-from PIL import Image,ImageFont, ImageDraw
-from utils.utils import BBoxUtility,letterbox_image,efficientdet_correct_boxes
+from PIL import Image, ImageDraw, ImageFont
+
+from nets.efficientdet import Efficientdet
 from utils.anchors import get_anchors
+from utils.utils import (BBoxUtility, efficientdet_correct_boxes,
+                         letterbox_image)
 
 image_sizes = [512, 640, 768, 896, 1024, 1280, 1408]
+
 def preprocess_input(image):
     image /= 255
     mean = [0.485, 0.456, 0.406]
@@ -22,12 +26,14 @@ def preprocess_input(image):
 #--------------------------------------------#
 #   使用自己训练好的模型预测需要修改3个参数
 #   model_path和classes_path和phi都需要修改！
+#   如果出现shape不匹配，一定要注意
+#   训练时的model_path和classes_path参数的修改
 #--------------------------------------------#
 class EfficientDet(object):
     _defaults = {
-        "model_path"    : 'model_data/efficientdet-d1-voc.h5',
+        "model_path"    : 'model_data/efficientdet-d0-voc.h5',
         "classes_path"  : 'model_data/voc_classes.txt',
-        "phi"           : 1,
+        "phi"           : 0,
         "confidence"    : 0.4,
         "iou"           : 0.3,
     }
@@ -48,8 +54,9 @@ class EfficientDet(object):
         self.model_image_size = [image_sizes[self.phi], image_sizes[self.phi],3]
         self.sess = K.get_session()
         self.generate()
-        self.bbox_util = BBoxUtility(self.num_classes,nms_thresh=self.iou)
+        self.bbox_util = BBoxUtility(self.num_classes, nms_thresh=self.iou)
         self.prior = self._get_prior()
+
     #---------------------------------------------------#
     #   获得所有的分类
     #---------------------------------------------------#
@@ -60,25 +67,30 @@ class EfficientDet(object):
         class_names = [c.strip() for c in class_names]
         return class_names
 
+    #---------------------------------------------------#
+    #   获得先验框
+    #---------------------------------------------------#
     def _get_prior(self):
         data = get_anchors(image_sizes[self.phi])
         return data
 
     #---------------------------------------------------#
-    #   获得所有的分类
+    #   载入模型
     #---------------------------------------------------#
     def generate(self):
         model_path = os.path.expanduser(self.model_path)
         assert model_path.endswith('.h5'), 'Keras model or weights must be a .h5 file.'
-        
-        # 计算总的种类
+        #----------------------------------------#
+        #   计算种类数量
+        #----------------------------------------#
         self.num_classes = len(self.class_names)
 
-        # 载入模型
+        #----------------------------------------#
+        #   创建Efficientdet模型
+        #----------------------------------------#
         self.Efficientdet = Efficientdet(self.phi,self.num_classes)
-        self.Efficientdet.load_weights(self.model_path,by_name=True,skip_mismatch=True)
+        self.Efficientdet.load_weights(self.model_path)
 
-        # self.Efficientdet.summary()
         print('{} model, anchors, and classes loaded.'.format(model_path))
 
         # 画框设置不同的颜色
@@ -94,37 +106,48 @@ class EfficientDet(object):
     #---------------------------------------------------#
     def detect_image(self, image):
         image_shape = np.array(np.shape(image)[0:2])
-
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #---------------------------------------------------------#
         crop_img = letterbox_image(image, [self.model_image_size[0],self.model_image_size[1]])
         photo = np.array(crop_img,dtype = np.float32)
-
-        # 图片预处理，归一化
-        photo = np.reshape(preprocess_input(photo),[1,self.model_image_size[0],self.model_image_size[1],self.model_image_size[2]])
+        #-----------------------------------------------------------#
+        #   图片预处理，归一化。获得的photo的shape为[1, 512, 512, 3]
+        #-----------------------------------------------------------#
+        photo = np.reshape(preprocess_input(photo),[1, self.model_image_size[0], self.model_image_size[1], self.model_image_size[2]])
 
         preds = self.Efficientdet.predict(photo)
-
-        # 将预测结果进行解码
+        #-----------------------------------------------------------#
+        #   将预测结果进行解码
+        #-----------------------------------------------------------#
         results = self.bbox_util.detection_out(preds, self.prior, confidence_threshold=self.confidence)
+        
+        #--------------------------------------#
+        #   如果没有检测到物体，则返回原图
+        #--------------------------------------#
         if len(results[0])<=0:
             return image
         results = np.array(results)
         
-        # 筛选出其中得分高于confidence的框
         det_label = results[0][:, 5]
         det_conf = results[0][:, 4]
         det_xmin, det_ymin, det_xmax, det_ymax = results[0][:, 0], results[0][:, 1], results[0][:, 2], results[0][:, 3]
-        
+        #-----------------------------------------------------------#
+        #   筛选出其中得分高于confidence的框 
+        #-----------------------------------------------------------#
         top_indices = [i for i, conf in enumerate(det_conf) if conf >= self.confidence]
         top_conf = det_conf[top_indices]
         top_label_indices = det_label[top_indices].tolist()
         top_xmin, top_ymin, top_xmax, top_ymax = np.expand_dims(det_xmin[top_indices],-1),np.expand_dims(det_ymin[top_indices],-1),np.expand_dims(det_xmax[top_indices],-1),np.expand_dims(det_ymax[top_indices],-1)
         
-        # 去掉灰条
+        #-----------------------------------------------------------#
+        #   去掉灰条部分
+        #-----------------------------------------------------------#
         boxes = efficientdet_correct_boxes(top_ymin,top_xmin,top_ymax,top_xmax,np.array([self.model_image_size[0],self.model_image_size[1]]),image_shape)
 
         font = ImageFont.truetype(font='model_data/simhei.ttf',size=np.floor(3e-2 * np.shape(image)[1] + 0.5).astype('int32'))
 
-        thickness = (np.shape(image)[0] + np.shape(image)[1]) // self.model_image_size[0]
+        thickness = max((np.shape(image)[0] + np.shape(image)[1]) // self.model_image_size[0], 1)
 
         for i, c in enumerate(top_label_indices):
             predicted_class = self.class_names[int(c)]
@@ -146,7 +169,7 @@ class EfficientDet(object):
             draw = ImageDraw.Draw(image)
             label_size = draw.textsize(label, font)
             label = label.encode('utf-8')
-            print(label)
+            print(label, top, left, bottom, right)
             
             if top - label_size[1] >= 0:
                 text_origin = np.array([left, top - label_size[1]])
