@@ -1,16 +1,11 @@
-import copy
-import math
 import os
 
 import numpy as np
-from keras.layers import Input
 from PIL import Image
 from tqdm import tqdm
 
 from efficientdet import EfficientDet
-from utils.anchors import get_anchors
-from utils.utils import (BBoxUtility, efficientdet_correct_boxes,
-                         letterbox_image)
+from utils.utils import efficientdet_correct_boxes, letterbox_image
 
 '''
 这里设置的门限值较低是因为计算map需要用到不同门限条件下的Recall和Precision值。
@@ -47,8 +42,8 @@ class mAP_EfficientDet(EfficientDet):
         #---------------------------------------------------------#
         #   给图像增加灰条，实现不失真的resize
         #---------------------------------------------------------#
-        crop_img = letterbox_image(image, [self.model_image_size[0],self.model_image_size[1]])
-        photo = np.array(crop_img,dtype = np.float32)
+        crop_img    = letterbox_image(image, [self.model_image_size[0],self.model_image_size[1]])
+        photo       = np.array(crop_img,dtype = np.float32)
         #-----------------------------------------------------------#
         #   图片预处理，归一化。获得的photo的shape为[1, 512, 512, 3]
         #-----------------------------------------------------------#

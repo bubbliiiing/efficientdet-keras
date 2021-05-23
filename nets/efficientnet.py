@@ -1,12 +1,7 @@
-from __future__ import absolute_import, division, print_function
-
 import collections
-import json
 import math
-import os
 import string
 
-import numpy as np
 from keras import backend, layers
 
 MOMENTUM = 0.99
@@ -179,9 +174,9 @@ def EfficientNet(width_coefficient,
                  blocks_args=DEFAULT_BLOCKS_ARGS,
                  inputs=None,
                  **kwargs):
-    activation = get_swish(**kwargs)
+    activation  = get_swish(**kwargs)
 
-    img_input = inputs
+    img_input   = inputs
     #-------------------------------------------------#
     #   创建stem部分
     #-------------------------------------------------#
@@ -266,7 +261,6 @@ def EfficientNetB5(inputs=None, **kwargs):
     return EfficientNet(1.6, 2.2, inputs=inputs, **kwargs)
 
 
-
 def EfficientNetB6(inputs=None, **kwargs):
     return EfficientNet(1.8, 2.6, inputs=inputs, **kwargs)
 
@@ -274,6 +268,3 @@ def EfficientNetB6(inputs=None, **kwargs):
 def EfficientNetB7(inputs=None, **kwargs):
     return EfficientNet(2.0, 3.1, inputs=inputs, **kwargs)
 
-
-if __name__ == '__main__':
-    print(EfficientNetB0())

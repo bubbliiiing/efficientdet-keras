@@ -2,10 +2,9 @@ import keras
 import numpy as np
 from keras.callbacks import (EarlyStopping, ModelCheckpoint, ReduceLROnPlateau,
                              TensorBoard)
-from keras.optimizers import Adam
 
 from nets.efficientdet import Efficientdet
-from nets.efficientdet_training import Generator, focal, smooth_l1
+from nets.efficientdet_training import Generator, focal, smooth_l1, LossHistory
 from utils.anchors import get_anchors
 from utils.utils import BBoxUtility
 
@@ -20,8 +19,8 @@ def get_classes(classes_path):
     class_names = [c.strip() for c in class_names]
     return class_names
 
-freeze_layers = [226, 328, 328, 373, 463, 565, 655, 802]
-image_sizes = [512, 640, 768, 896, 1024, 1280, 1408, 1536]
+freeze_layers   = [226, 328, 328, 373, 463, 565, 655, 802]
+image_sizes     = [512, 640, 768, 896, 1024, 1280, 1408, 1536]
 
 #----------------------------------------------------#
 #   检测精度mAP和pr曲线计算参考视频
@@ -47,7 +46,6 @@ if __name__ == "__main__":
     #------------------------------------------------------#
     class_names = get_classes(classes_path)
     num_classes = len(class_names)  
-
     #------------------------------------------------------#
     #   权值文件请看README，百度网盘下载
     #   训练自己的数据集时提示维度不匹配正常
@@ -93,6 +91,8 @@ if __name__ == "__main__":
     checkpoint = ModelCheckpoint('logs/ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5',
         monitor='val_loss', save_weights_only=True, save_best_only=False, period=1)
     early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1)
+    loss_history = LossHistory("logs")
+
 
     for i in range(freeze_layers[phi]):
         model.layers[i].trainable = False
@@ -109,28 +109,36 @@ if __name__ == "__main__":
         #--------------------------------------------#
         #   Batch_size不要太小，不然训练效果很差
         #--------------------------------------------#
-        Batch_size = 8
-        Lr = 1e-3
-        Init_Epoch = 0
-        Freeze_Epoch = 50
+        Batch_size      = 8
+        Lr              = 1e-3
+        Init_Epoch      = 0
+        Freeze_Epoch    = 50
 
-        gen = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
-                        (image_sizes[phi], image_sizes[phi]),num_classes)
+        gen             = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
+                        (image_sizes[phi], image_sizes[phi]), num_classes)
+
         model.compile(loss={
                     'regression'    : smooth_l1(),
                     'classification': focal()
                 },optimizer=keras.optimizers.Adam(Lr)
         )   
+
+        epoch_size      = num_train // Batch_size
+        epoch_size_val  = num_val // Batch_size
+
+        if epoch_size == 0 or epoch_size_val == 0:
+            raise ValueError("数据集过小，无法进行训练，请扩充数据集。")
+
         print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, Batch_size))
         model.fit_generator(
                 gen.generate(True), 
-                steps_per_epoch=max(1, num_train//Batch_size),
+                steps_per_epoch=epoch_size,
                 validation_data=gen.generate(False),
-                validation_steps=max(1, num_val//Batch_size),
+                validation_steps=epoch_size_val,
                 epochs=Freeze_Epoch, 
                 verbose=1,
-                initial_epoch=Init_Epoch ,
-                callbacks=[logging, checkpoint, reduce_lr, early_stopping]
+                initial_epoch=Init_Epoch,
+                callbacks=[logging, checkpoint, reduce_lr, early_stopping, loss_history]
             )
 
     for i in range(freeze_layers[phi]):
@@ -140,27 +148,34 @@ if __name__ == "__main__":
         #--------------------------------------------#
         #   Batch_size不要太小，不然训练效果很差
         #--------------------------------------------#
-        Batch_size = 4
-        Lr = 5e-5
-        Freeze_Epoch = 50
-        Epoch = 100
+        Batch_size      = 4
+        Lr              = 5e-5
+        Freeze_Epoch    = 50
+        Epoch           = 100
         
-        gen = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
-                        (image_sizes[phi], image_sizes[phi]),num_classes)
+        gen             = Generator(bbox_util, Batch_size, lines[:num_train], lines[num_train:],
+                                        (image_sizes[phi], image_sizes[phi]), num_classes)
 
         model.compile(loss={
                     'regression'    : smooth_l1(),
                     'classification': focal()
                 },optimizer=keras.optimizers.Adam(Lr)
         )   
+        
+        epoch_size      = num_train // Batch_size
+        epoch_size_val  = num_val // Batch_size
+
+        if epoch_size == 0 or epoch_size_val == 0:
+            raise ValueError("数据集过小，无法进行训练，请扩充数据集。")
+
         print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, Batch_size))
         model.fit_generator(
                 gen.generate(True), 
-                steps_per_epoch=max(1, num_train//Batch_size),
+                steps_per_epoch=epoch_size,
                 validation_data=gen.generate(False),
-                validation_steps=max(1, num_val//Batch_size),
+                validation_steps=epoch_size_val,
                 epochs=Epoch, 
                 verbose=1,
                 initial_epoch=Freeze_Epoch,
-                callbacks=[logging, checkpoint, reduce_lr, early_stopping]
+                callbacks=[logging, checkpoint, reduce_lr, early_stopping, loss_history]
             )

@@ -1,7 +1,5 @@
 from functools import reduce
 
-import keras
-import numpy as np
 import tensorflow as tf
 from keras import initializers, layers, models
 from utils.utils import PriorProbability
@@ -344,12 +342,12 @@ class BoxNet:
             'strides': 1,
             'padding': 'same',
             'bias_initializer': 'zeros',
-            'depthwise_initializer': initializers.VarianceScaling(),
-            'pointwise_initializer': initializers.VarianceScaling(),
+            'depthwise_initializer': initializers.RandomNormal(stddev=0.01),
+            'pointwise_initializer': initializers.RandomNormal(stddev=0.01),
         }
 
-        self.convs = [layers.SeparableConv2D(filters=width, name=f'{self.name}/box-{i}', **options) for i in range(depth)]
-        self.head = layers.SeparableConv2D(filters=num_anchors * 4, name=f'{self.name}/box-predict', **options)
+        self.convs  = [layers.SeparableConv2D(filters=width, name=f'{self.name}/box-{i}', **options) for i in range(depth)]
+        self.head   = layers.SeparableConv2D(filters=num_anchors * 4, name=f'{self.name}/box-predict', **options)
 
         self.bns = [[layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/box-{i}-bn-{j}') for j in
              range(3, 8)] for i in range(depth)]
@@ -382,18 +380,18 @@ class ClassNet:
             'kernel_size': 3,
             'strides': 1,
             'padding': 'same',
-            'depthwise_initializer': initializers.VarianceScaling(),
-            'pointwise_initializer': initializers.VarianceScaling(),
+            'depthwise_initializer': initializers.RandomNormal(stddev=0.01),
+            'pointwise_initializer': initializers.RandomNormal(stddev=0.01),
         }
 
-        self.convs = [layers.SeparableConv2D(filters=width, bias_initializer='zeros', name=f'{self.name}/class-{i}', **options) for i in range(depth)]
-        self.head = layers.SeparableConv2D(filters=num_classes * num_anchors, bias_initializer=PriorProbability(probability=0.01), name=f'{self.name}/class-predict', **options)
+        self.convs  = [layers.SeparableConv2D(filters=width, bias_initializer='zeros', name=f'{self.name}/class-{i}', **options) for i in range(depth)]
+        self.head   = layers.SeparableConv2D(filters=num_classes * num_anchors, bias_initializer=PriorProbability(probability=0.01), name=f'{self.name}/class-predict', **options)
 
-        self.bns = [[layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/class-{i}-bn-{j}') for j
-             in range(3, 8)] for i in range(depth)]
+        self.bns    = [[layers.BatchNormalization(momentum=MOMENTUM, epsilon=EPSILON, name=f'{self.name}/class-{i}-bn-{j}') for j
+                    in range(3, 8)] for i in range(depth)]
 
-        self.relu = layers.Lambda(lambda x: tf.nn.swish(x))
-        self.reshape = layers.Reshape((-1, num_classes))
+        self.relu       = layers.Lambda(lambda x: tf.nn.swish(x))
+        self.reshape    = layers.Reshape((-1, num_classes))
         self.activation = layers.Activation('sigmoid')
 
     def call(self, inputs):
@@ -422,7 +420,7 @@ def Efficientdet(phi, num_classes=20, num_anchors=9):
     #   神经网络的输入
     #   efficientdet-D0     512,512,3
     #------------------------------------------------------#
-    inputs = layers.Input((image_sizes[phi], image_sizes[phi], 3))
+    inputs              = layers.Input((image_sizes[phi], image_sizes[phi], 3))
 
     #------------------------------------------------------#
     #   在经过多次BiFPN模块的堆叠后，我们获得的fpn_features
@@ -445,8 +443,8 @@ def Efficientdet(phi, num_classes=20, num_anchors=9):
     #   创建efficient head
     #   可以将特征层转换成预测结果
     #------------------------------------------------------#
-    box_net = BoxNet(fpn_num_filters[phi], box_class_repeats[phi], num_anchors=num_anchors, name='box_net')
-    class_net = ClassNet(fpn_num_filters[phi], box_class_repeats[phi], num_classes=num_classes, num_anchors=num_anchors, name='class_net')
+    box_net     = BoxNet(fpn_num_filters[phi], box_class_repeats[phi], num_anchors=num_anchors, name='box_net')
+    class_net   = ClassNet(fpn_num_filters[phi], box_class_repeats[phi], num_classes=num_classes, num_anchors=num_anchors, name='class_net')
 
     #------------------------------------------------------#
     #   利用efficient head获得各个特征层的预测结果

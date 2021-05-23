@@ -2,8 +2,6 @@ import math
 
 import keras
 import numpy as np
-import tensorflow as tf
-from keras import backend as K
 from PIL import Image
 
 
@@ -62,14 +60,13 @@ class PriorProbability(keras.initializers.Initializer):
 
 class BBoxUtility(object):
     def __init__(self, num_classes, priors=None, overlap_threshold=0.5,ignore_threshold=0.4,
-                 nms_thresh=0.3, top_k=400):
+                 nms_thresh=0.3):
         self.num_classes = num_classes
         self.priors = priors
         self.num_priors = 0 if priors is None else len(priors)
         self.overlap_threshold = overlap_threshold
         self.ignore_threshold = ignore_threshold
         self._nms_thresh = nms_thresh
-        self._top_k = top_k
 
     def iou(self, box):
         # 计算出每个真实框与所有的先验框的iou
@@ -201,11 +198,11 @@ class BBoxUtility(object):
 
     def decode_boxes(self, mbox_loc, mbox_priorbox):
         # 获得先验框的宽与高
-        prior_width = mbox_priorbox[:, 2] - mbox_priorbox[:, 0]
-        prior_height = mbox_priorbox[:, 3] - mbox_priorbox[:, 1]
+        prior_width     = mbox_priorbox[:, 2] - mbox_priorbox[:, 0]
+        prior_height    = mbox_priorbox[:, 3] - mbox_priorbox[:, 1]
         # 获得先验框的中心点
-        prior_center_x = 0.5 * (mbox_priorbox[:, 2] + mbox_priorbox[:, 0])
-        prior_center_y = 0.5 * (mbox_priorbox[:, 3] + mbox_priorbox[:, 1])
+        prior_center_x  = 0.5 * (mbox_priorbox[:, 2] + mbox_priorbox[:, 0])
+        prior_center_y  = 0.5 * (mbox_priorbox[:, 3] + mbox_priorbox[:, 1])
 
         # 真实框距离先验框中心的xy轴偏移情况
         decode_bbox_center_x = mbox_loc[:, 0] * prior_width
@@ -214,10 +211,10 @@ class BBoxUtility(object):
         decode_bbox_center_y += prior_center_y
         
         # 真实框的宽与高的求取
-        decode_bbox_width = np.exp(mbox_loc[:, 2])
-        decode_bbox_width *= prior_width
-        decode_bbox_height = np.exp(mbox_loc[:, 3])
-        decode_bbox_height *= prior_height
+        decode_bbox_width   = np.exp(mbox_loc[:, 2])
+        decode_bbox_width   *= prior_width
+        decode_bbox_height  = np.exp(mbox_loc[:, 3])
+        decode_bbox_height  *= prior_height
 
         # 获取真实框的左上角与右下角
         decode_bbox_xmin = decode_bbox_center_x - 0.5 * decode_bbox_width
@@ -239,13 +236,8 @@ class BBoxUtility(object):
         #   预测结果分为两部分，0为回归预测结果
         #   1为分类预测结果
         #---------------------------------------------------#
-        mbox_loc = predictions[0]
-        mbox_conf = predictions[1]
-        
-        #------------------------#
-        #   获得先验框
-        #------------------------#
-        mbox_priorbox = mbox_priorbox
+        mbox_loc    = predictions[0]
+        mbox_conf   = predictions[1]
         
         results = []
         # 对每一张图片进行处理，由于在predict.py的时候，我们只输入一张图片，所以for i in range(len(mbox_loc))只进行一次
@@ -264,15 +256,15 @@ class BBoxUtility(object):
             #--------------------------------#
             #   判断置信度是否大于门限要求
             #--------------------------------#
-            conf_mask = (class_conf >= confidence_threshold)[:,0]
+            conf_mask       = (class_conf >= confidence_threshold)[:, 0]
 
             #--------------------------------#
             #   将预测结果进行堆叠
             #--------------------------------#
-            detections = np.concatenate((decode_bbox[conf_mask], class_conf[conf_mask], class_pred[conf_mask]), 1)
-            unique_class = np.unique(detections[:,-1])
+            detections      = np.concatenate((decode_bbox[conf_mask], class_conf[conf_mask], class_pred[conf_mask]), 1)
+            unique_class    = np.unique(detections[:,-1])
 
-            best_box = []
+            best_box        = []
             if len(unique_class) == 0:
                 results.append(best_box)
                 continue
@@ -282,9 +274,9 @@ class BBoxUtility(object):
             #   对种类进行循环可以帮助我们对每一个类分别进行非极大抑制。
             #---------------------------------------------------------------#
             for c in unique_class:
-                cls_mask = detections[:,-1] == c
-                detection = detections[cls_mask]
-                scores = detection[:,4]
+                cls_mask    = detections[:, -1] == c
+                detection   = detections[cls_mask]
+                scores      = detection[:,4]
                 #------------------------------------------#
                 #   5、根据得分对该种类进行从大到小排序。
                 #------------------------------------------#
