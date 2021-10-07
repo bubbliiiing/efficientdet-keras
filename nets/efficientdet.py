@@ -1,16 +1,58 @@
+import math
 from functools import reduce
 
+import keras
+import numpy as np
 import tensorflow as tf
 from keras import initializers, layers, models
-from utils.utils import PriorProbability
 
-from nets.efficientnet import (EfficientNetB0, EfficientNetB1, EfficientNetB2,
-                               EfficientNetB3, EfficientNetB4, EfficientNetB5,
-                               EfficientNetB6, EfficientNetB7)
-from nets.layers import wBiFPNAdd
+from nets.efficientnet import (EPSILON, MOMENTUM, EfficientNetB0,
+                               EfficientNetB1, EfficientNetB2, EfficientNetB3,
+                               EfficientNetB4, EfficientNetB5, EfficientNetB6,
+                               EfficientNetB7)
 
-MOMENTUM = 0.99
-EPSILON = 1e-3
+
+class PriorProbability(keras.initializers.Initializer):
+    def __init__(self, probability=0.01):
+        self.probability = probability
+
+    def get_config(self):
+        return {
+            'probability': self.probability
+        }
+
+    def __call__(self, shape, dtype=None):
+        result = np.ones(shape) * -math.log((1 - self.probability) / self.probability)
+        return result
+
+class wBiFPNAdd(keras.layers.Layer):
+    def __init__(self, epsilon=1e-4, **kwargs):
+        super(wBiFPNAdd, self).__init__(**kwargs)
+        self.epsilon = epsilon
+
+    def build(self, input_shape):
+        num_in = len(input_shape)
+        self.w = self.add_weight(name=self.name,
+                                 shape=(num_in,),
+                                 initializer=keras.initializers.constant(1 / num_in),
+                                 trainable=True,
+                                 dtype=tf.float32)
+
+    def call(self, inputs, **kwargs):
+        w = keras.activations.relu(self.w)
+        x = tf.reduce_sum([w[i] * inputs[i] for i in range(len(inputs))], axis=0)
+        x = x / (tf.reduce_sum(w) + self.epsilon)
+        return x
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0]
+
+    def get_config(self):
+        config = super(wBiFPNAdd, self).get_config()
+        config.update({
+            'epsilon': self.epsilon
+        })
+        return config
 
 def SeparableConvBlock(num_channels, kernel_size, strides, name):
     f1 = layers.SeparableConv2D(num_channels, kernel_size=kernel_size, strides=strides, padding='same',
@@ -405,13 +447,13 @@ class ClassNet:
         outputs = self.activation(outputs)
         return outputs
 
-def Efficientdet(phi, num_classes=20, num_anchors=9):
+def efficientdet(input_shape, phi, num_classes=20, num_anchors=9):
     assert phi in range(8)
     # 不同版本的Efficientdet的efficientdet使用的参数不同。
-    fpn_num_filters     = [64, 88, 112, 160, 224, 288, 384,384]
+    fpn_num_filters     = [64, 88, 112, 160, 224, 288, 384, 384]
     fpn_cell_repeats    = [3, 4, 5, 6, 7, 7, 8, 8]
     box_class_repeats   = [3, 3, 3, 4, 4, 4, 5, 5]
-    image_sizes         = [512, 640, 768, 896, 1024, 1280, 1408, 1536]
+    
     backbones           = [EfficientNetB0, EfficientNetB1, EfficientNetB2,
                            EfficientNetB3, EfficientNetB4, EfficientNetB5, 
                            EfficientNetB6, EfficientNetB7]
@@ -420,7 +462,7 @@ def Efficientdet(phi, num_classes=20, num_anchors=9):
     #   神经网络的输入
     #   efficientdet-D0     512,512,3
     #------------------------------------------------------#
-    inputs              = layers.Input((image_sizes[phi], image_sizes[phi], 3))
+    inputs              = layers.Input(input_shape)
 
     #------------------------------------------------------#
     #   在经过多次BiFPN模块的堆叠后，我们获得的fpn_features
@@ -450,11 +492,11 @@ def Efficientdet(phi, num_classes=20, num_anchors=9):
     #   利用efficient head获得各个特征层的预测结果
     #   并且将预测结果进行堆叠。
     #------------------------------------------------------#
-    classification = [class_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
-    classification = layers.Concatenate(axis=1, name='classification')(classification)
-    regression = [box_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
-    regression = layers.Concatenate(axis=1, name='regression')(regression)
+    classification  = [class_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
+    classification  = layers.Concatenate(axis=1, name='classification')(classification)
+    regression      = [box_net.call([feature, i]) for i, feature in enumerate(fpn_features)]
+    regression      = layers.Concatenate(axis=1, name='regression')(regression)
 
-    model = models.Model(inputs=[inputs], outputs=[regression, classification], name='efficientdet')
+    model           = models.Model(inputs=[inputs], outputs=[regression, classification], name='efficientdet')
 
     return model
