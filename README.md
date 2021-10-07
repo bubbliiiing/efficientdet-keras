@@ -6,8 +6,8 @@
 2. [所需环境 Environment](#所需环境)
 3. [文件下载 Download](#文件下载)
 4. [注意事项 Attention](#注意事项)
-5. [预测步骤 How2predict](#预测步骤)
-6. [训练步骤 How2train](#训练步骤)
+5. [训练步骤 How2train](#训练步骤)
+6. [预测步骤 How2predict](#预测步骤)
 7. [评估步骤 How2eval](#评估步骤)
 8. [参考资料 Reference](#Reference)
 
