@@ -13,9 +13,8 @@ from utils.anchors import get_anchors
 from utils.callbacks import ExponentDecayScheduler, LossHistory
 from utils.dataloader import EfficientdetDatasets
 from utils.utils import get_classes, image_sizes
-import tensorflow as tf
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.7)
-sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) 
+
+
 '''
 训练自己的目标检测模型一定需要注意以下几点：
 1、训练前仔细检查自己的格式是否满足要求，该库要求数据集格式为VOC格式，需要准备好的内容有输入图片和标签
@@ -77,7 +76,6 @@ if __name__ == "__main__":
     #---------------------------------------------------------------------#
     anchors_size    = [32, 64, 128, 256, 512]
     
-
     #----------------------------------------------------------------------------------------------------------------------------#
     #   训练分为两个阶段，分别是冻结阶段和解冻阶段。设置冻结阶段是为了满足机器性能不足的同学的训练需求。
     #   冻结训练需要的显存较小，显卡非常差的情况下，可设置Freeze_Epoch等于UnFreeze_Epoch，此时仅仅进行冻结训练。
