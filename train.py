@@ -75,21 +75,30 @@ if __name__ == "__main__":
     #                   一般调小浅层先验框的大小就行了！因为浅层负责小物体检测！
     #---------------------------------------------------------------------#
     anchors_size    = [32, 64, 128, 256, 512]
-    
+
     #----------------------------------------------------------------------------------------------------------------------------#
     #   训练分为两个阶段，分别是冻结阶段和解冻阶段。设置冻结阶段是为了满足机器性能不足的同学的训练需求。
     #   冻结训练需要的显存较小，显卡非常差的情况下，可设置Freeze_Epoch等于UnFreeze_Epoch，此时仅仅进行冻结训练。
     #      
     #   在此提供若干参数设置建议，各位训练者根据自己的需求进行灵活调整：
     #   （一）从整个模型的预训练权重开始训练： 
-    #       Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 100，Freeze_Train = True（默认参数）
-    #       Init_Epoch = 0，UnFreeze_Epoch = 100，Freeze_Train = False（不冻结训练）
-    #       其中：UnFreeze_Epoch可以在100-300之间调整。optimizer_type = 'sgd'，Init_lr = 1e-2。
+    #       Adam：
+    #           Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 100，Freeze_Train = True，optimizer_type = 'adam'，Init_lr = 1e-3，weight_decay = 0。（冻结）
+    #           Init_Epoch = 0，UnFreeze_Epoch = 100，Freeze_Train = False，optimizer_type = 'adam'，Init_lr = 1e-3，weight_decay = 0。（不冻结）
+    #       SGD：
+    #           Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 100，Freeze_Train = True，optimizer_type = 'sgd'，Init_lr = 1e-2，weight_decay = 4e-5。（冻结）
+    #           Init_Epoch = 0，UnFreeze_Epoch = 100，Freeze_Train = False，optimizer_type = 'sgd'，Init_lr = 1e-2，weight_decay = 4e-5。（不冻结）
+    #       其中：UnFreeze_Epoch可以在100-300之间调整。
     #   （二）从主干网络的预训练权重开始训练：
-    #       Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 200，Freeze_Train = True（冻结训练）
-    #       Init_Epoch = 0，UnFreeze_Epoch = 200，Freeze_Train = False（不冻结训练）
+    #       Adam：
+    #           Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 100，Freeze_Train = True，optimizer_type = 'adam'，Init_lr = 1e-3，weight_decay = 0。（冻结）
+    #           Init_Epoch = 0，UnFreeze_Epoch = 100，Freeze_Train = False，optimizer_type = 'adam'，Init_lr = 1e-3，weight_decay = 0。（不冻结）
+    #       SGD：
+    #           Init_Epoch = 0，Freeze_Epoch = 50，UnFreeze_Epoch = 200，Freeze_Train = True，optimizer_type = 'sgd'，Init_lr = 1e-2，weight_decay = 4e-5。（冻结）
+    #           Init_Epoch = 0，UnFreeze_Epoch = 200，Freeze_Train = False，optimizer_type = 'sgd'，Init_lr = 1e-2，weight_decay = 4e-5。（不冻结）
     #       其中：由于从主干网络的预训练权重开始训练，主干的权值不一定适合目标检测，需要更多的训练跳出局部最优解。
-    #             UnFreeze_Epoch可以在200-300之间调整，YOLOV5和YOLOX均推荐使用300。optimizer_type = 'sgd'，Init_lr = 1e-2。
+    #             UnFreeze_Epoch可以在200-300之间调整，YOLOV5和YOLOX均推荐使用300。
+    #             Adam相较于SGD收敛的快一些。因此UnFreeze_Epoch理论上可以小一点，但依然推荐更多的Epoch。
     #   （三）batch_size的设置：
     #       在显卡能够接受的范围内，以大为好。显存不足与数据集大小无关，提示显存不足（OOM或者CUDA out of memory）请调小batch_size。
     #       受到BatchNorm层影响，batch_size最小为2，不能为1。
@@ -136,7 +145,7 @@ if __name__ == "__main__":
     #                   当使用SGD优化器时建议设置   Init_lr=1e-2
     #   Min_lr          模型的最小学习率，默认为最大学习率的0.01
     #------------------------------------------------------------------#
-    Init_lr             = 1e-2
+    Init_lr             = 1e-3
     Min_lr              = Init_lr * 0.01
     #------------------------------------------------------------------#
     #   optimizer_type  使用到的优化器种类，可选的有adam、sgd
@@ -146,9 +155,9 @@ if __name__ == "__main__":
     #   weight_decay    权值衰减，可防止过拟合
     #                   adam会导致weight_decay错误，使用adam时建议设置为0。
     #------------------------------------------------------------------#
-    optimizer_type      = "sgd"
-    momentum            = 0.937
-    weight_decay        = 5e-4
+    optimizer_type      = "adam"
+    momentum            = 0.9
+    weight_decay        = 0
     #------------------------------------------------------------------#
     #   lr_decay_type   使用到的学习率下降方式，可选的有'step'、'cos'
     #------------------------------------------------------------------#
@@ -227,11 +236,13 @@ if __name__ == "__main__":
         end_epoch   = Freeze_Epoch if Freeze_Train else UnFreeze_Epoch
         
         #-------------------------------------------------------------------#
-        #   判断当前batch_size与64的差别，自适应调整学习率
+        #   判断当前batch_size，自适应调整学习率
         #-------------------------------------------------------------------#
-        nbs     = 64
-        Init_lr_fit = max(batch_size / nbs * Init_lr, 3e-4)
-        Min_lr_fit  = max(batch_size / nbs * Min_lr, 3e-6)
+        nbs             = 16
+        lr_limit_max    = 1e-3 if optimizer_type == 'adam' else 5e-2
+        lr_limit_min    = 3e-4 if optimizer_type == 'adam' else 5e-4
+        Init_lr_fit     = min(max(batch_size / nbs * Init_lr, lr_limit_min), lr_limit_max)
+        Min_lr_fit      = min(max(batch_size / nbs * Min_lr, lr_limit_min * 1e-2), lr_limit_max * 1e-2)
 
         optimizer = {
             'adam'  : Adam(lr = Init_lr_fit, beta_1 = momentum),
@@ -298,11 +309,13 @@ if __name__ == "__main__":
             end_epoch   = UnFreeze_Epoch
                 
             #-------------------------------------------------------------------#
-            #   判断当前batch_size与64的差别，自适应调整学习率
+            #   判断当前batch_size，自适应调整学习率
             #-------------------------------------------------------------------#
-            nbs     = 64
-            Init_lr_fit = max(batch_size / nbs * Init_lr, 3e-4)
-            Min_lr_fit  = max(batch_size / nbs * Min_lr, 3e-6)
+            nbs             = 16
+            lr_limit_max    = 1e-3 if optimizer_type == 'adam' else 5e-2
+            lr_limit_min    = 3e-4 if optimizer_type == 'adam' else 5e-4
+            Init_lr_fit     = min(max(batch_size / nbs * Init_lr, lr_limit_min), lr_limit_max)
+            Min_lr_fit      = min(max(batch_size / nbs * Min_lr, lr_limit_min * 1e-2), lr_limit_max * 1e-2)
             #---------------------------------------#
             #   获得学习率下降的公式
             #---------------------------------------#
