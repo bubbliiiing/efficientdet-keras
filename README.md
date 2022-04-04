@@ -1,18 +1,22 @@
 ## Efficientdet：Scalable and Efficient Object目标检测模型在Keras当中的实现
 ---
 
-**2021年10月12日更新：**   
-**进行了大幅度的更新，对代码的模块进行修改，加了大量注释。**   
-
-### 目录
-1. [性能情况 Performance](#性能情况)
-2. [所需环境 Environment](#所需环境)
-3. [文件下载 Download](#文件下载)
+## 目录
+1. [仓库更新 Top News](#仓库更新)
+2. [性能情况 Performance](#性能情况)
+3. [所需环境 Environment](#所需环境)
 4. [注意事项 Attention](#注意事项)
-5. [训练步骤 How2train](#训练步骤)
-6. [预测步骤 How2predict](#预测步骤)
-7. [评估步骤 How2eval](#评估步骤)
-8. [参考资料 Reference](#Reference)
+5. [文件下载 Download](#文件下载)
+6. [训练步骤 How2train](#训练步骤)
+7. [预测步骤 How2predict](#预测步骤)
+8. [评估步骤 How2eval](#评估步骤)
+9. [参考资料 Reference](#Reference)
+
+## Top News
+**`2022-04`**:**进行了大幅度的更新，支持step、cos学习率下降法、支持adam、sgd优化器选择、支持学习率根据batch_size自适应调整、新增图片裁剪。**  
+BiliBili视频中的原仓库地址为：https://github.com/bubbliiiing/efficientdet-keras/tree/bilibili
+
+**`2021-10`**:**进行了大幅度的更新，增加了大量注释、增加了大量可调整参数、对代码的组成模块进行修改、增加fps、视频预测、批量预测等功能。**   
 
 ### 性能情况
 | 训练数据集 | 权值文件名称 | 测试数据集 | 输入图片大小 | mAP 0.5:0.95 | mAP 0.5 |
@@ -26,12 +30,12 @@ keras==2.1.5
 
 ### 文件下载
 训练所需的h5可以在百度网盘下载。其中包括Efficientdet-D0和Efficientdet-D1的voc权重，可以直接用于预测；还有Efficientnet-b0到Efficientnet-b7的权重，可用于迁移学习。  
-链接: https://pan.baidu.com/s/1dbC0vx9CghExZb1txJCNZg    
-提取码: m9ve
+链接: https://pan.baidu.com/s/1i8Xf5gis4_64ZGLdkUYztw    
+提取码: tcpw    
 
 VOC数据集下载地址如下，里面已经包括了训练集、测试集、验证集（与测试集一样），无需再次划分：  
-链接: https://pan.baidu.com/s/1YuBbBKxm2FGgTU5OfaeC5A    
-提取码: uack   
+链接: https://pan.baidu.com/s/19Mw2u_df_nBzsC2lg20fQA   
+提取码: j5ge   
 
 ## 训练步骤
 ### a、训练VOC07+12数据集
